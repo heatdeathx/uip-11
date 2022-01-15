@@ -80,9 +80,9 @@ contract GovernorBravoDelegate is GovernorBravoDelegateStorageV1, GovernorBravoE
 
         uint latestProposalId = latestProposalIds[msg.sender];
         if (latestProposalId != 0) {
-          ProposalState proposersLatestProposalState = state(latestProposalId);
-          require(proposersLatestProposalState != ProposalState.Active, "GovernorBravo::propose: one live proposal per proposer, found an already active proposal");
-          require(proposersLatestProposalState != ProposalState.Pending, "GovernorBravo::propose: one live proposal per proposer, found an already pending proposal");
+            ProposalState proposersLatestProposalState = state(latestProposalId);
+            require(proposersLatestProposalState != ProposalState.Active, "GovernorBravo::propose: one live proposal per proposer, found an already active proposal");
+            require(proposersLatestProposalState != ProposalState.Pending, "GovernorBravo::propose: one live proposal per proposer, found an already pending proposal");
         }
 
         uint startBlock = add256(block.number, votingDelay);
