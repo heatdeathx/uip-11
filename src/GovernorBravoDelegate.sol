@@ -35,7 +35,7 @@ contract GovernorBravoDelegate is GovernorBravoDelegateStorageV1, GovernorBravoE
     bytes32 public constant DOMAIN_TYPEHASH = keccak256("EIP712Domain(string name,uint256 chainId,address verifyingContract)");
 
     /// @notice The EIP-712 typehash for the ballot struct used by the contract
-    bytes32 public constant BALLOT_TYPEHASH = keccak256("Ballot(uint256 proposalId,uint8 support)");
+    bytes32 public constant BALLOT_TYPEHASH = keccak256("Ballot(uint256 proposalId,uint8 support,uint96 amount)");
 
     /**
      * @notice Used to initialize the contract during delegator contructor
@@ -217,8 +217,14 @@ contract GovernorBravoDelegate is GovernorBravoDelegateStorageV1, GovernorBravoE
      * @param proposalId The id of the proposal to vote on
      * @param support The support value for the vote. 0=against, 1=for, 2=abstain
      */
-    function castVote(uint proposalId, uint8 support) external {
-        emit VoteCast(msg.sender, proposalId, support, castVoteInternal(msg.sender, proposalId, support), "");
+    function castVote(uint proposalId, uint8 support, uint96 amount) external {
+        emit VoteCast(
+            msg.sender,
+            proposalId,
+            support,
+            castVoteInternal(msg.sender, proposalId, support, amount),
+            ""
+        );
     }
 
     /**
@@ -227,21 +233,33 @@ contract GovernorBravoDelegate is GovernorBravoDelegateStorageV1, GovernorBravoE
      * @param support The support value for the vote. 0=against, 1=for, 2=abstain
      * @param reason The reason given for the vote by the voter
      */
-    function castVoteWithReason(uint proposalId, uint8 support, string calldata reason) external {
-        emit VoteCast(msg.sender, proposalId, support, castVoteInternal(msg.sender, proposalId, support), reason);
+    function castVoteWithReason(uint proposalId, uint8 support, uint96 amount, string calldata reason) external {
+        emit VoteCast(
+            msg.sender,
+            proposalId,
+            support,
+            castVoteInternal(msg.sender, proposalId, support, amount),
+            reason
+        );
     }
 
     /**
      * @notice Cast a vote for a proposal by signature
      * @dev External function that accepts EIP-712 signatures for voting on proposals.
      */
-    function castVoteBySig(uint proposalId, uint8 support, uint8 v, bytes32 r, bytes32 s) external {
+    function castVoteBySig(uint proposalId, uint8 support, uint96 amount, uint8 v, bytes32 r, bytes32 s) external {
         bytes32 domainSeparator = keccak256(abi.encode(DOMAIN_TYPEHASH, keccak256(bytes(name)), getChainIdInternal(), address(this)));
-        bytes32 structHash = keccak256(abi.encode(BALLOT_TYPEHASH, proposalId, support));
+        bytes32 structHash = keccak256(abi.encode(BALLOT_TYPEHASH, proposalId, support, amount));
         bytes32 digest = keccak256(abi.encodePacked("\x19\x01", domainSeparator, structHash));
         address signatory = ecrecover(digest, v, r, s);
         require(signatory != address(0), "GovernorBravo::castVoteBySig: invalid signature");
-        emit VoteCast(signatory, proposalId, support, castVoteInternal(signatory, proposalId, support), "");
+        emit VoteCast(
+            signatory,
+            proposalId,
+            support,
+            castVoteInternal(signatory, proposalId, support, amount),
+            ""
+        );
     }
 
     /**
@@ -251,13 +269,13 @@ contract GovernorBravoDelegate is GovernorBravoDelegateStorageV1, GovernorBravoE
      * @param support The support value for the vote. 0=against, 1=for, 2=abstain
      * @return The number of votes cast
      */
-    function castVoteInternal(address voter, uint proposalId, uint8 support) internal returns (uint96) {
+    function castVoteInternal(address voter, uint proposalId, uint8 support, uint96 amount) internal returns (uint96) {
         require(state(proposalId) == ProposalState.Active, "GovernorBravo::castVoteInternal: voting is closed");
         require(support <= 2, "GovernorBravo::castVoteInternal: invalid vote type");
         Proposal storage proposal = proposals[proposalId];
         Receipt storage receipt = proposal.receipts[voter];
-        require(receipt.hasVoted == false, "GovernorBravo::castVoteInternal: voter already voted");
         uint96 votes = uni.getPriorVotes(voter, proposal.startBlock);
+        require(amount <= votes - receipt.votes, "GovernorBravo::castVoteInternal: insufficient votes");
 
         if (support == 0) {
             proposal.againstVotes = add256(proposal.againstVotes, votes);
@@ -267,9 +285,7 @@ contract GovernorBravoDelegate is GovernorBravoDelegateStorageV1, GovernorBravoE
             proposal.abstainVotes = add256(proposal.abstainVotes, votes);
         }
 
-        receipt.hasVoted = true;
-        receipt.support = support;
-        receipt.votes = votes;
+        receipt.votes = add96(u96(receipt.votes), amount);
 
         return votes;
     }
@@ -376,6 +392,17 @@ contract GovernorBravoDelegate is GovernorBravoDelegateStorageV1, GovernorBravoE
     function sub256(uint256 a, uint256 b) internal pure returns (uint) {
         require(b <= a, "subtraction underflow");
         return a - b;
+    }
+
+    function add96(uint96 a, uint96 b) internal pure returns (uint96) {
+        uint96 c = a + b;
+        require(c >= a, "addition overflow");
+        return c;
+    }
+
+    function u96(uint256 value) internal pure returns (uint96) {
+        require(value < 2 ** 96, "SafeCast: value doesn\'t fit in 96 bits");
+        return uint96(value);
     }
 
     function getChainIdInternal() internal pure returns (uint) {
